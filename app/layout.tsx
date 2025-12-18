@@ -1,5 +1,5 @@
 import "./globals.css";
-import SessionProvider from "@/components/SessionProvider"; 
+import SessionProvider from "@/app/components/SessionProvider";
 
 export const metadata = {
   title: "Pactovale",
