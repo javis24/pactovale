@@ -1,15 +1,22 @@
-// app/layout.tsx
-import Provider from "./components/SessionProvider"; 
 import "./globals.css";
+import SessionProvider from "@/components/SessionProvider"; 
 
-export default function RootLayout({ children }) {
+export const metadata = {
+  title: "Pactovale",
+  description: "Sistema de préstamos",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="es">
       <body>
-        {/* Envolver los children con el Provider */}
-        <Provider>
-            {children}
-        </Provider>
+        <SessionProvider>
+          {children}
+        </SessionProvider>
       </body>
     </html>
   );
