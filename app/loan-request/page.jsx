@@ -90,6 +90,17 @@ export default function LoanRequestPage() {
     }));
   };
 
+  // Función para convertir Archivo -> Texto (Base64)
+        const fileToBase64 = (file) => {
+        return new Promise((resolve, reject) => {
+            if (!file) return resolve(null);
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+        };
+
   // --- LÓGICA DE COMPRESIÓN IMÁGENES ---
   const compressImage = async (file) => {
     return new Promise((resolve) => {
@@ -141,29 +152,52 @@ export default function LoanRequestPage() {
     setSignatureImage(null);
   };
 
-  // --- ENVÍO FINAL ---
+// --- ENVÍO FINAL CORREGIDO ---
   const handleSubmit = async () => {
     setLoading(true);
-    const formData = new FormData();
-    if (files.ineFront) formData.append('ineFront', files.ineFront);
-    if (files.ineBack) formData.append('ineBack', files.ineBack);
-    if (files.selfie) formData.append('selfie', files.selfie);
-    if (signatureImage) formData.append('signature', signatureImage);
-    formData.append('bankName', bankData.bankName);
-    formData.append('accountNumber', bankData.accountNumber);
-    // Nota: Aquí podrías enviar también loanSelection.amount y loanSelection.term si ajustas tu backend
 
     try {
-      const res = await fetch('/api/user/update-profile', { method: 'POST', body: formData });
+      // 1. Convertir las imágenes a texto (Base64) para enviarlas en JSON
+      const ineFrontB64 = await fileToBase64(files.ineFront);
+      const ineBackB64 = await fileToBase64(files.ineBack);
+      const selfieB64 = await fileToBase64(files.selfie);
+
+      // 2. Preparar el paquete de datos
+      const payload = {
+        amount: loanSelection.amount,
+        term: loanSelection.term,       // Enviamos el plazo
+        payment: loanSelection.payment, // Enviamos el pago calculado
+        bankName: bankData.bankName,
+        accountNumber: bankData.accountNumber,
+        signature: signatureImage,      // Ya está en Base64
+        ineFront: ineFrontB64,
+        ineBack: ineBackB64,
+        selfie: selfieB64
+      };
+
+      // 3. Enviar a la API correcta (/api/loan)
+      const res = await fetch('/api/loan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json', // Importante: Decirle que es JSON
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+
       if (res.ok) {
         setSuccess(true);
-        setTimeout(() => router.push('/portal'), 3000);
+        setTimeout(() => router.push('/perfil'), 3000);
       } else {
-        const errorData = await res.json();
-        alert(`Error: ${errorData.message}`);
+        alert(`Error: ${data.message}`);
       }
-    } catch (error) { console.error(error); alert("Error de conexión."); } 
-    finally { setLoading(false); }
+    } catch (error) {
+      console.error(error);
+      alert("Error de conexión al enviar la solicitud.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (success) return (

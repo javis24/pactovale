@@ -17,8 +17,14 @@ const User = sequelize.define('User', {
   bankName: { type: DataTypes.STRING, allowNull: true },
   accountNumber: { type: DataTypes.STRING, allowNull: true },
 
+  ineFront: { type: DataTypes.TEXT('long'), allowNull: true },
+  ineBack: { type: DataTypes.TEXT('long'), allowNull: true },
+  selfie: { type: DataTypes.TEXT('long'), allowNull: true },
+  signature: { type: DataTypes.TEXT('long'), allowNull: true },
+
   role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' }
 }, { timestamps: true });
+
 
 User.sync({ alter: true }).catch(err => console.error(err));
 

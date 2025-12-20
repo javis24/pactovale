@@ -7,12 +7,12 @@ const Document = sequelize.define('Document', {
     primaryKey: true,
     autoIncrement: true,
   },
-  // ESTA ES LA PARTE QUE FALTABA:
+
   userId: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'Users', // Debe coincidir con el nombre de tabla de usuarios
+      model: 'Users', 
       key: 'id',
     }
   },
