@@ -8,13 +8,16 @@ const Loan = sequelize.define('Loan', {
     type: DataTypes.ENUM('pendiente', 'aprobado', 'pagado', 'rechazado'), 
     defaultValue: 'pendiente' 
   },
-  paymentsMade: { type: DataTypes.INTEGER, defaultValue: 0 }, 
-  totalPayments: { type: DataTypes.INTEGER, defaultValue: 12 }, 
+  paymentsMade: { type: DataTypes.INTEGER, defaultValue: 0 },
+  totalPayments: { type: DataTypes.INTEGER, defaultValue: 12 },
   requestDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  
+
+  startDate: { type: DataTypes.DATE, allowNull: true }, 
 });
 
 Loan.belongsTo(User);
 User.hasMany(Loan);
-Loan.sync({ alter: true }).catch(err => console.error("Error creando tabla Loan:", err));
+Loan.sync({ alter: true }).catch(err => console.error("Error tabla Loan:", err));
 
 export default Loan;

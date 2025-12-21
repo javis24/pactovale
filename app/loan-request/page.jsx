@@ -409,12 +409,12 @@ export default function LoanRequestPage() {
                     <label className="text-sm font-bold text-gray-700 ml-1">Banco</label>
                     <div className="relative">
                         <CreditCard className="absolute left-4 top-4 text-black-400" size={20} />
-                        <input type="text" placeholder="Ej. BBVA" value={bankData.bankName} onChange={(e) => setBankData({...bankData, bankName: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-xl outline-none focus:border-[#ff5aa4]" />
+                        <input type="text" placeholder="Ej. BBVA" value={bankData.bankName} onChange={(e) => setBankData({...bankData, bankName: e.target.value})} className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-xl outline-none focus:border-[#ff5aa4] text-black" />
                     </div>
                 </div>
                 <div className="space-y-2">
                     <label className="text-sm font-bold text-gray-700 ml-1">Cuenta / CLABE</label>
-                    <input type="number" placeholder="18 dígitos" value={bankData.accountNumber} onChange={(e) => setBankData({...bankData, accountNumber: e.target.value})} className="w-full px-4 py-4 bg-white border border-black-200 rounded-xl outline-none focus:border-[#ff5aa4] font-mono" />
+                    <input type="number" placeholder="18 dígitos" value={bankData.accountNumber} onChange={(e) => setBankData({...bankData, accountNumber: e.target.value})} className="w-full px-4 py-4 bg-white border border-black-200 rounded-xl outline-none focus:border-[#ff5aa4] font-mono text-black" />
                 </div>
             </div>
             <div className="flex gap-3 mt-8">
