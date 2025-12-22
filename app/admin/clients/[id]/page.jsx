@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock, CheckCircle, AlertCircle } from "lucide-react";
 
 export default function ClientProfilePage() {
   const { id } = useParams();
@@ -27,9 +27,9 @@ export default function ClientProfilePage() {
     if (id) fetchClientData();
   }, [id]);
 
+  // --- ACCIÓN 1: AUTORIZAR PRÉSTAMO ---
   const handleAuthorize = async (loanId) => {
     if(!confirm("¿Confirmas que se ha realizado la transferencia bancaria al cliente?")) return;
-    
     setProcessing(true);
     try {
         const res = await fetch('/api/admin/approve-loan', {
@@ -37,13 +37,23 @@ export default function ClientProfilePage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ loanId })
         });
+        if(res.ok) { alert("✅ Préstamo activado."); window.location.reload(); }
+        else { alert("Error al autorizar."); }
+    } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
+  };
 
-        if(res.ok) {
-            alert("✅ Préstamo marcado como DEPOSITADO. El cliente ya puede ver su calendario.");
-            window.location.reload();
-        } else {
-            alert("Error al autorizar.");
-        }
+  // --- ACCIÓN 2: REGISTRAR PAGO QUINCENAL (NUEVO) ---
+  const handleRegisterPayment = async (loanId, paymentNumber) => {
+    if(!confirm(`¿Confirmas que recibiste el pago de la Quincena #${paymentNumber}?`)) return;
+    setProcessing(true);
+    try {
+        const res = await fetch('/api/admin/register-payment', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ loanId })
+        });
+        if(res.ok) { alert("✅ Pago registrado correctamente."); window.location.reload(); }
+        else { const d = await res.json(); alert(d.message); }
     } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
@@ -63,6 +73,20 @@ export default function ClientProfilePage() {
 
   const loans = client.Loans ? [...client.Loans].reverse() : [];
   const activeLoan = loans.find(l => l.status === 'aprobado' || l.status === 'pendiente');
+
+  // Generar Calendario para Admin
+  const getSchedule = (loan) => {
+      if(!loan || !loan.startDate) return [];
+      const start = new Date(loan.startDate);
+      let dates = [];
+      for (let i = 1; i <= loan.totalPayments; i++) {
+        const d = new Date(start); d.setDate(start.getDate() + (i * 15));
+        dates.push({ number: i, date: d, status: i <= loan.paymentsMade ? 'pagado' : 'pendiente' });
+      }
+      return dates;
+  };
+  const schedule = activeLoan && activeLoan.status === 'aprobado' ? getSchedule(activeLoan) : [];
+  const nextPayment = schedule.find(p => p.status === 'pendiente');
 
   return (
     <div className="min-h-screen font-sans pb-10" style={{ backgroundColor: theme.bg }}>
@@ -84,19 +108,16 @@ export default function ClientProfilePage() {
 
       <div className="max-w-5xl mx-auto px-4 -mt-20 space-y-6">
         
-        {/* FILA 1: Info y Banco */}
+        {/* Info y Banco */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Contacto */}
             <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Datos de Contacto</h3>
                 <div className="space-y-5">
                     <div className="flex items-center gap-4"><div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center text-[#ff5aa4]"><Phone size={20} /></div><div><p className="text-xs text-gray-400">WhatsApp</p><a href={`https://wa.me/${client.whatsapp}`} target="_blank" className="font-bold text-gray-800 hover:text-[#ff5aa4]">{client.whatsapp}</a></div></div>
                     <div className="flex items-center gap-4"><div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center text-[#ff5aa4]"><MapPin size={20} /></div><div><p className="text-xs text-gray-400">Domicilio</p><p className="font-bold text-gray-800 leading-tight">{client.address}</p></div></div>
-                    <div className="flex items-center gap-4"><div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center text-[#ff5aa4]"><Calendar size={20} /></div><div><p className="text-xs text-gray-400">Registro</p><p className="font-bold text-gray-800">{new Date(client.createdAt).toLocaleDateString()}</p></div></div>
                 </div>
             </div>
 
-            {/* Banco y Préstamo Solicitado */}
             <div className="space-y-6">
                 <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-8 shadow-lg text-white relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-10 -mt-10"></div>
@@ -105,24 +126,90 @@ export default function ClientProfilePage() {
                     <div><p className="text-xs text-gray-400 mb-2">Cuenta / CLABE</p><div className="bg-white/10 p-4 rounded-xl font-mono text-lg tracking-wider flex items-center justify-between">{client.accountNumber || "------------------"}<button onClick={() => {navigator.clipboard.writeText(client.accountNumber); alert("Copiado!");}} className="text-gray-400 hover:text-white" title="Copiar"><span className="text-xs font-sans">COPIAR</span></button></div></div>
                 </div>
 
-                {/* TARJETA DE RESUMEN DE PRÉSTAMO (NUEVO) */}
+                {/* TARJETA DE ESTADO DE PRÉSTAMO */}
                 {activeLoan && (
                     <div className="bg-white rounded-3xl p-6 shadow-sm border border-pink-100 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-[#ff5aa4]"></div>
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2"><DollarSign size={16} /> Solicitud Actual</h3>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><DollarSign size={16} /> Préstamo Actual</h3>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${activeLoan.status === 'aprobado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{activeLoan.status}</span>
+                        </div>
                         <div className="flex justify-between items-end">
                             <div>
                                 <p className="text-3xl font-bold text-gray-800">${activeLoan.amount}</p>
                                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-1"><Clock size={14}/> {activeLoan.totalPayments} Quincenas</p>
                             </div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${activeLoan.status === 'aprobado' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                {activeLoan.status}
-                            </span>
+                            {/* Barra de Progreso */}
+                            <div className="text-right">
+                                <p className="text-xs font-bold text-gray-400 mb-1">PROGRESO</p>
+                                <p className="text-xl font-bold text-[#ff5aa4]">{activeLoan.paymentsMade} / {activeLoan.totalPayments}</p>
+                            </div>
                         </div>
                     </div>
                 )}
             </div>
         </div>
+
+        {/* --- SECCIÓN NUEVA: CONTROL DE COBRANZA --- */}
+        {activeLoan && activeLoan.status === 'aprobado' && (
+             <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2 flex items-center gap-2">
+                    <CheckCircle size={18} /> Control de Pagos
+                </h3>
+
+                {/* Siguiente Pago a Registrar */}
+                {nextPayment ? (
+                    <div className="bg-pink-50 border border-pink-100 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-[#ff5aa4] text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md">
+                                {nextPayment.number}
+                            </div>
+                            <div>
+                                <h4 className="text-lg font-bold text-gray-800">Próximo Pago: Quincena {nextPayment.number}</h4>
+                                <p className="text-sm text-gray-600">Fecha esperada: {nextPayment.date.toLocaleDateString()}</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => handleRegisterPayment(activeLoan.id, nextPayment.number)}
+                            disabled={processing}
+                            className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg transition transform active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {processing ? "Registrando..." : "✅ Registrar Pago Recibido"}
+                        </button>
+                    </div>
+                ) : (
+                    <div className="bg-green-100 text-green-800 p-4 rounded-xl text-center font-bold mb-6">
+                        🎉 ¡Préstamo Liquidado! Todos los pagos han sido registrados.
+                    </div>
+                )}
+
+                {/* Historial Completo */}
+                <div className="border rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
+                            <tr>
+                                <th className="px-4 py-3">#</th>
+                                <th className="px-4 py-3">Fecha</th>
+                                <th className="px-4 py-3 text-right">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {schedule.map((pay) => (
+                                <tr key={pay.number} className="hover:bg-gray-50">
+                                    <td className="px-4 py-3 font-bold text-gray-600">{pay.number}</td>
+                                    <td className="px-4 py-3 text-gray-600">{pay.date.toLocaleDateString()}</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${pay.status === 'pagado' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                                            {pay.status.toUpperCase()}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+             </div>
+        )}
 
         {/* Documentos */}
         <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
@@ -135,7 +222,7 @@ export default function ClientProfilePage() {
             </div>
         </div>
 
-        {/* BOTÓN DE ACCIÓN */}
+        {/* BOTÓN DE ACTIVACIÓN (Solo si pendiente) */}
         {activeLoan && activeLoan.status === 'pendiente' ? (
              <div className="pb-10 animate-pulse">
                 <button 
