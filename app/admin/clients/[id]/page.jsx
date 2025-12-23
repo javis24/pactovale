@@ -2,7 +2,24 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock, CheckCircle, AlertCircle } from "lucide-react";
+// IMPORTANTE: Agregamos FileText a los iconos
+import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock, CheckCircle, MessageCircle, FileText } from "lucide-react";
+
+// IMPORTANTE: Importamos dynamic de Next.js
+import dynamic from "next/dynamic";
+
+// IMPORTANTE: Importamos el componente de PDF de forma dinámica para evitar errores de servidor (SSR)
+const PDFDownloadLink = dynamic(
+  () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
+  {
+    ssr: false,
+    loading: () => <button className="bg-gray-300 text-gray-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 cursor-not-allowed">Cargando PDF...</button>,
+  }
+);
+
+// IMPORTANTE: Importamos nuestro diseño de contrato
+import ContractDocument from "@/app/components/ContractPDF";
+
 
 export default function ClientProfilePage() {
   const { id } = useParams();
@@ -27,9 +44,18 @@ export default function ClientProfilePage() {
     if (id) fetchClientData();
   }, [id]);
 
-  // --- ACCIÓN 1: AUTORIZAR PRÉSTAMO ---
-  const handleAuthorize = async (loanId) => {
-    if(!confirm("¿Confirmas que se ha realizado la transferencia bancaria al cliente?")) return;
+  const sendWhatsApp = (phoneNumber, message) => {
+    let cleanNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanNumber.length === 10) {
+        cleanNumber = `52${cleanNumber}`;
+    }
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
+  };
+
+  const handleAuthorize = async (loanId, amount) => {
+    if(!confirm("¿Confirmas la transferencia? Esto notificará al cliente por WhatsApp.")) return;
+    
     setProcessing(true);
     try {
         const res = await fetch('/api/admin/approve-loan', {
@@ -37,14 +63,21 @@ export default function ClientProfilePage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ loanId })
         });
-        if(res.ok) { alert("✅ Préstamo activado."); window.location.reload(); }
-        else { alert("Error al autorizar."); }
+
+        if(res.ok) {
+            const msg = `¡Hola ${client.name}! 👋\n\n¡Felicidades! 🎉 Tu préstamo de $${amount} ha sido aprobado y depositado a tu cuenta.\n\nPuedes ver tu calendario de pagos y descargar tu contrato en tu perfil: https://pactovale.vercel.app/portal`;
+            sendWhatsApp(client.whatsapp, msg);
+
+            alert("✅ Autorizado. Se abrió WhatsApp para notificar.");
+            window.location.reload();
+        } else {
+            alert("Error al autorizar.");
+        }
     } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
-  // --- ACCIÓN 2: REGISTRAR PAGO QUINCENAL (NUEVO) ---
   const handleRegisterPayment = async (loanId, paymentNumber) => {
-    if(!confirm(`¿Confirmas que recibiste el pago de la Quincena #${paymentNumber}?`)) return;
+    if(!confirm(`¿Confirmas el pago de la Quincena #${paymentNumber}?`)) return;
     setProcessing(true);
     try {
         const res = await fetch('/api/admin/register-payment', {
@@ -52,9 +85,20 @@ export default function ClientProfilePage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ loanId })
         });
-        if(res.ok) { alert("✅ Pago registrado correctamente."); window.location.reload(); }
+        if(res.ok) { 
+            const msg = `Hola ${client.name} 👋\n\nConfirmamos que hemos recibido tu pago de la Quincena #${paymentNumber}. ✅\n\n¡Gracias por tu puntualidad!`;
+            sendWhatsApp(client.whatsapp, msg);
+            alert("✅ Pago registrado y notificado."); 
+            window.location.reload(); 
+        }
         else { const d = await res.json(); alert(d.message); }
     } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
+  };
+
+  const handleReminder = (paymentNumber, date) => {
+      const dateStr = new Date(date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+      const msg = `Hola ${client.name} 👋\n\nRecordatorio amistoso: Tu pago de la Quincena #${paymentNumber} vence el día *${dateStr}*.\n\nEvita intereses moratorios realizando tu transferencia a tiempo. ⏳`;
+      sendWhatsApp(client.whatsapp, msg);
   };
 
   const getDocUrl = (type) => {
@@ -74,7 +118,6 @@ export default function ClientProfilePage() {
   const loans = client.Loans ? [...client.Loans].reverse() : [];
   const activeLoan = loans.find(l => l.status === 'aprobado' || l.status === 'pendiente');
 
-  // Generar Calendario para Admin
   const getSchedule = (loan) => {
       if(!loan || !loan.startDate) return [];
       const start = new Date(loan.startDate);
@@ -91,7 +134,7 @@ export default function ClientProfilePage() {
   return (
     <div className="min-h-screen font-sans pb-10" style={{ backgroundColor: theme.bg }}>
       
-      {/* HEADER */}
+      {/* HEADER (Sin cambios) */}
       <div className="relative bg-[#ff5aa4] pb-32 pt-8 px-6 shadow-lg">
          <div className="max-w-5xl mx-auto flex items-start justify-between">
             <Link href="/admin/clients" className="p-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition backdrop-blur-sm"><ArrowLeft size={24} /></Link>
@@ -103,12 +146,18 @@ export default function ClientProfilePage() {
             </div>
             <h1 className="text-3xl font-bold text-center px-4">{client.name}</h1>
             <p className="opacity-90 mt-1 flex items-center gap-2 text-sm"><span className="bg-white/20 px-2 py-0.5 rounded text-xs">ID: {client.id}</span>{client.email}</p>
+            <button 
+                onClick={() => sendWhatsApp(client.whatsapp, `Hola ${client.name}, nos comunicamos de Pactovale...`)}
+                className="mt-4 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 shadow-lg transition"
+            >
+                <MessageCircle size={16} /> Abrir Chat WhatsApp
+            </button>
          </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-4 -mt-20 space-y-6">
         
-        {/* Info y Banco */}
+        {/* Info y Banco (Sin cambios) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Datos de Contacto</h3>
@@ -126,7 +175,6 @@ export default function ClientProfilePage() {
                     <div><p className="text-xs text-gray-400 mb-2">Cuenta / CLABE</p><div className="bg-white/10 p-4 rounded-xl font-mono text-lg tracking-wider flex items-center justify-between">{client.accountNumber || "------------------"}<button onClick={() => {navigator.clipboard.writeText(client.accountNumber); alert("Copiado!");}} className="text-gray-400 hover:text-white" title="Copiar"><span className="text-xs font-sans">COPIAR</span></button></div></div>
                 </div>
 
-                {/* TARJETA DE ESTADO DE PRÉSTAMO */}
                 {activeLoan && (
                     <div className="bg-white rounded-3xl p-6 shadow-sm border border-pink-100 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-[#ff5aa4]"></div>
@@ -139,7 +187,6 @@ export default function ClientProfilePage() {
                                 <p className="text-3xl font-bold text-gray-800">${activeLoan.amount}</p>
                                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-1"><Clock size={14}/> {activeLoan.totalPayments} Quincenas</p>
                             </div>
-                            {/* Barra de Progreso */}
                             <div className="text-right">
                                 <p className="text-xs font-bold text-gray-400 mb-1">PROGRESO</p>
                                 <p className="text-xl font-bold text-[#ff5aa4]">{activeLoan.paymentsMade} / {activeLoan.totalPayments}</p>
@@ -150,14 +197,13 @@ export default function ClientProfilePage() {
             </div>
         </div>
 
-        {/* --- SECCIÓN NUEVA: CONTROL DE COBRANZA --- */}
+        {/* --- CONTROL DE COBRANZA (Sin cambios mayores) --- */}
         {activeLoan && activeLoan.status === 'aprobado' && (
              <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2 flex items-center gap-2">
                     <CheckCircle size={18} /> Control de Pagos
                 </h3>
 
-                {/* Siguiente Pago a Registrar */}
                 {nextPayment ? (
                     <div className="bg-pink-50 border border-pink-100 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
                         <div className="flex items-center gap-4">
@@ -169,13 +215,22 @@ export default function ClientProfilePage() {
                                 <p className="text-sm text-gray-600">Fecha esperada: {nextPayment.date.toLocaleDateString()}</p>
                             </div>
                         </div>
-                        <button 
-                            onClick={() => handleRegisterPayment(activeLoan.id, nextPayment.number)}
-                            disabled={processing}
-                            className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg transition transform active:scale-95 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {processing ? "Registrando..." : "✅ Registrar Pago Recibido"}
-                        </button>
+                        <div className="flex gap-2">
+                             <button 
+                                onClick={() => handleReminder(nextPayment.number, nextPayment.date)}
+                                className="bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 px-4 py-3 rounded-xl font-bold shadow-sm flex items-center gap-2"
+                                title="Enviar recordatorio por WhatsApp"
+                            >
+                                <MessageCircle size={20} /> <span className="hidden sm:inline">Recordar</span>
+                            </button>
+                            <button 
+                                onClick={() => handleRegisterPayment(activeLoan.id, nextPayment.number)}
+                                disabled={processing}
+                                className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg transition transform active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {processing ? "..." : "✅ Registrar Pago"}
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <div className="bg-green-100 text-green-800 p-4 rounded-xl text-center font-bold mb-6">
@@ -183,7 +238,6 @@ export default function ClientProfilePage() {
                     </div>
                 )}
 
-                {/* Historial Completo */}
                 <div className="border rounded-xl overflow-hidden">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-xs">
@@ -211,26 +265,67 @@ export default function ClientProfilePage() {
              </div>
         )}
 
-        {/* Documentos */}
+        {/* --- SECCIÓN NUEVA: DOCUMENTACIÓN LEGAL (CON PDF) --- */}
+        {activeLoan && activeLoan.status === 'aprobado' && (
+          <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2 flex items-center gap-2">
+              <FileText size={18} /> Documentación Legal
+            </h3>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-200">
+              <div>
+                <h4 className="text-lg font-bold text-gray-800">Contrato de Préstamo Mercantil</h4>
+                <p className="text-sm text-gray-600">Este documento incluye los términos, condiciones y el pagaré firmado digitalmente por el cliente.</p>
+              </div>
+              
+              {/* IMPORTANTE: El componente PDFDownloadLink necesita que le pasemos
+                  el componente del documento (<ContractDocument />) y un nombre de archivo.
+              */}
+              <PDFDownloadLink
+                document={<ContractDocument client={client} loan={activeLoan} />}
+                fileName={`Contrato_${client.name.replace(/\s+/g, '_')}_${activeLoan.id}.pdf`}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-md transition transform active:scale-95 flex items-center gap-2 no-underline"
+              >
+                {/* Esta función renderiza el botón y cambia el texto mientras se genera el PDF */}
+                {({ blob, url, loading, error }) =>
+                  loading ? 'Generando PDF...' : <><FileText size={20} /> Descargar Contrato PDF</>
+                }
+              </PDFDownloadLink>
+            </div>
+          </div>
+        )}
+
+        {/* Documentos Visuales (Sin cambios) */}
         <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Expediente Digital</h3>
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Expediente Digital (Imágenes)</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <DocThumbnail title="INE Frente" url={ineFrontUrl} />
-                <DocThumbnail title="INE Reverso" url={ineBackUrl} />
-                <DocThumbnail title="Selfie" url={selfieUrl} />
+                <DocThumbnail 
+                    title="INE Frente" 
+                    url={ineFrontUrl} 
+                    fileName={`INE_Frente_${client.name}.jpg`} 
+                />
+                <DocThumbnail 
+                    title="INE Reverso" 
+                    url={ineBackUrl} 
+                    fileName={`INE_Reverso_${client.name}.jpg`} 
+                />
+                <DocThumbnail 
+                    title="Selfie" 
+                    url={selfieUrl} 
+                    fileName={`Selfie_${client.name}.jpg`} 
+                />
                 <div className="col-span-1"><p className="text-xs font-bold text-gray-500 mb-2">Firma Pagaré</p>{signatureUrl ? (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center p-2 cursor-pointer hover:bg-white transition" onClick={() => window.open(signatureUrl)}><img src={signatureUrl} className="max-w-full max-h-full opacity-80" alt="Firma" /></div>) : (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400"><span className="text-xs">Pendiente</span></div>)}</div>
             </div>
         </div>
 
-        {/* BOTÓN DE ACTIVACIÓN (Solo si pendiente) */}
+        {/* BOTÓN DE ACTIVACIÓN (Sin cambios) */}
         {activeLoan && activeLoan.status === 'pendiente' ? (
              <div className="pb-10 animate-pulse">
                 <button 
-                    onClick={() => handleAuthorize(activeLoan.id)}
+                    onClick={() => handleAuthorize(activeLoan.id, activeLoan.amount)}
                     disabled={processing}
                     className="w-full py-5 bg-green-500 hover:bg-green-600 text-white font-bold text-lg rounded-2xl shadow-xl shadow-green-200 transition transform active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
                 >
-                    {processing ? "Procesando..." : <><FileCheck size={24} /> Confirmar Transferencia y Activar Préstamo</>}
+                    {processing ? "Procesando..." : <><FileCheck size={24} /> Confirmar Transferencia y Notificar por WhatsApp</>}
                 </button>
             </div>
         ) : null}
@@ -240,17 +335,57 @@ export default function ClientProfilePage() {
   );
 }
 
-function DocThumbnail({ title, url }) {
+// --- COMPONENTE MEJORADO PARA DESCARGAR IMÁGENES ---
+function DocThumbnail({ title, url, fileName }) {
+    
+    // Función para forzar la descarga
+    const handleDownload = (e) => {
+        e.stopPropagation(); // Evita que se abra el modal si hay clic
+        if (!url) return;
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName || 'documento_pactovale.jpg';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     return (
-        <div className="col-span-1 flex flex-col">
+        <div className="col-span-1 flex flex-col group">
             <p className="text-xs font-bold text-gray-500 mb-2">{title}</p>
+            
             {url ? (
-                <div className="h-32 bg-gray-100 rounded-xl overflow-hidden relative group cursor-pointer border border-gray-200" onClick={() => window.open(url, '_blank')}>
-                    <img src={url} className="w-full h-full object-cover transition duration-500 group-hover:scale-110" alt={title} />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white"><Download size={20} /></div>
+                <div className="relative h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-sm transition-all hover:shadow-md">
+                    
+                    {/* Imagen de fondo */}
+                    <img src={url} className="w-full h-full object-cover" alt={title} />
+                    
+                    {/* Capa oscura al pasar el mouse (Hover) */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+                        
+                        {/* Botón Ver (Ojo) */}
+                        <button 
+                            onClick={() => window.open(url, '_blank')}
+                            className="bg-white text-gray-800 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-100 flex items-center gap-1"
+                        >
+                             👁️ Ver
+                        </button>
+
+                        {/* Botón Descargar (Flecha) */}
+                        <button 
+                            onClick={handleDownload}
+                            className="bg-[#ff5aa4] text-white px-3 py-1 rounded-full text-xs font-bold hover:bg-pink-600 flex items-center gap-1"
+                        >
+                             ⬇️ Descargar
+                        </button>
+                    </div>
                 </div>
             ) : (
-                <div className="h-32 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1"><User size={20} className="opacity-20" /><span className="text-[10px] uppercase font-bold">Pendiente</span></div>
+                <div className="h-32 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1">
+                    <User size={20} className="opacity-20" />
+                    <span className="text-[10px] uppercase font-bold">Pendiente</span>
+                </div>
             )}
         </div>
     );
