@@ -2,24 +2,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-// IMPORTANTE: Agregamos FileText a los iconos
 import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock, CheckCircle, MessageCircle, FileText } from "lucide-react";
-
-// IMPORTANTE: Importamos dynamic de Next.js
 import dynamic from "next/dynamic";
-
-// IMPORTANTE: Importamos el componente de PDF de forma dinámica para evitar errores de servidor (SSR)
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
-  {
-    ssr: false,
-    loading: () => <button className="bg-gray-300 text-gray-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 cursor-not-allowed">Cargando PDF...</button>,
-  }
-);
-
-// IMPORTANTE: Importamos nuestro diseño de contrato
 import ContractDocument from "@/app/components/ContractPDF";
 
+const PDFDownloadLink = dynamic(
+  () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
+  { ssr: false, loading: () => <span className="text-xs text-gray-400">Cargando PDF...</span> }
+);
 
 export default function ClientProfilePage() {
   const { id } = useParams();
@@ -46,16 +36,13 @@ export default function ClientProfilePage() {
 
   const sendWhatsApp = (phoneNumber, message) => {
     let cleanNumber = phoneNumber.replace(/\D/g, '');
-    if (cleanNumber.length === 10) {
-        cleanNumber = `52${cleanNumber}`;
-    }
+    if (cleanNumber.length === 10) cleanNumber = `52${cleanNumber}`;
     const encodedMessage = encodeURIComponent(message);
     window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
   };
 
   const handleAuthorize = async (loanId, amount) => {
     if(!confirm("¿Confirmas la transferencia? Esto notificará al cliente por WhatsApp.")) return;
-    
     setProcessing(true);
     try {
         const res = await fetch('/api/admin/approve-loan', {
@@ -63,16 +50,12 @@ export default function ClientProfilePage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ loanId })
         });
-
         if(res.ok) {
-            const msg = `¡Hola ${client.name}! 👋\n\n¡Felicidades! 🎉 Tu préstamo de $${amount} ha sido aprobado y depositado a tu cuenta.\n\nPuedes ver tu calendario de pagos y descargar tu contrato en tu perfil: https://pactovale.vercel.app/portal`;
+            const msg = `¡Hola ${client.name}! 👋\n\n¡Felicidades! 🎉 Tu préstamo de $${amount} ha sido aprobado y depositado.\n\nPuedes ver tu calendario de pagos aquí: https://pactovale.com/portal`;
             sendWhatsApp(client.whatsapp, msg);
-
-            alert("✅ Autorizado. Se abrió WhatsApp para notificar.");
+            alert("✅ Autorizado.");
             window.location.reload();
-        } else {
-            alert("Error al autorizar.");
-        }
+        } else { alert("Error al autorizar."); }
     } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
@@ -86,18 +69,17 @@ export default function ClientProfilePage() {
             body: JSON.stringify({ loanId })
         });
         if(res.ok) { 
-            const msg = `Hola ${client.name} 👋\n\nConfirmamos que hemos recibido tu pago de la Quincena #${paymentNumber}. ✅\n\n¡Gracias por tu puntualidad!`;
+            const msg = `Hola ${client.name} 👋\n\nConfirmamos recibido tu pago de la Quincena #${paymentNumber}. ✅`;
             sendWhatsApp(client.whatsapp, msg);
-            alert("✅ Pago registrado y notificado."); 
+            alert("✅ Pago registrado."); 
             window.location.reload(); 
-        }
-        else { const d = await res.json(); alert(d.message); }
+        } else { const d = await res.json(); alert(d.message); }
     } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
   const handleReminder = (paymentNumber, date) => {
       const dateStr = new Date(date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
-      const msg = `Hola ${client.name} 👋\n\nRecordatorio amistoso: Tu pago de la Quincena #${paymentNumber} vence el día *${dateStr}*.\n\nEvita intereses moratorios realizando tu transferencia a tiempo. ⏳`;
+      const msg = `Hola ${client.name} 👋\n\nRecordatorio: Tu pago de la Quincena #${paymentNumber} vence el *${dateStr}*. ⏳`;
       sendWhatsApp(client.whatsapp, msg);
   };
 
@@ -105,6 +87,41 @@ export default function ClientProfilePage() {
     if (!client) return null;
     const doc = client.Documents ? client.Documents.find(d => d.type === type) : null;
     return doc ? doc.url : (client[type] || null);
+  };
+
+  // --- 📅 NUEVA LÓGICA DE CALENDARIO ---
+  const getSchedule = (loan) => {
+      if(!loan || !loan.startDate) return [];
+      
+      const start = new Date(loan.startDate);
+      const startDay = start.getDate(); // Día del mes (1-31)
+      let dates = [];
+      
+      // 1. Determinar la fecha del PRIMER pago
+      let currentPaymentDate = new Date(start);
+
+      if (startDay < 27) {
+          // REGLA 1: Si es antes del 27, se paga el día 30 de ESTE mes
+          currentPaymentDate.setDate(30); 
+      } else {
+          // REGLA 2: Si es 27 o más, se toman 15 días naturales (brinca al siguiente mes)
+          currentPaymentDate.setDate(start.getDate() + 15);
+      }
+
+      // 2. Generar el resto de pagos
+      for (let i = 1; i <= loan.totalPayments; i++) {
+        // Guardamos la fecha actual en el array
+        dates.push({ 
+            number: i, 
+            date: new Date(currentPaymentDate), // Copia de la fecha
+            status: i <= loan.paymentsMade ? 'pagado' : 'pendiente' 
+        });
+
+        // Calculamos la fecha del SIGUIENTE pago (+15 días)
+        currentPaymentDate.setDate(currentPaymentDate.getDate() + 15);
+      }
+      
+      return dates;
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="w-10 h-10 border-4 border-pink-200 border-t-[#ff5aa4] rounded-full animate-spin"></div></div>;
@@ -117,24 +134,13 @@ export default function ClientProfilePage() {
 
   const loans = client.Loans ? [...client.Loans].reverse() : [];
   const activeLoan = loans.find(l => l.status === 'aprobado' || l.status === 'pendiente');
-
-  const getSchedule = (loan) => {
-      if(!loan || !loan.startDate) return [];
-      const start = new Date(loan.startDate);
-      let dates = [];
-      for (let i = 1; i <= loan.totalPayments; i++) {
-        const d = new Date(start); d.setDate(start.getDate() + (i * 15));
-        dates.push({ number: i, date: d, status: i <= loan.paymentsMade ? 'pagado' : 'pendiente' });
-      }
-      return dates;
-  };
   const schedule = activeLoan && activeLoan.status === 'aprobado' ? getSchedule(activeLoan) : [];
   const nextPayment = schedule.find(p => p.status === 'pendiente');
 
   return (
     <div className="min-h-screen font-sans pb-10" style={{ backgroundColor: theme.bg }}>
       
-      {/* HEADER (Sin cambios) */}
+      {/* HEADER */}
       <div className="relative bg-[#ff5aa4] pb-32 pt-8 px-6 shadow-lg">
          <div className="max-w-5xl mx-auto flex items-start justify-between">
             <Link href="/admin/clients" className="p-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition backdrop-blur-sm"><ArrowLeft size={24} /></Link>
@@ -157,7 +163,7 @@ export default function ClientProfilePage() {
 
       <div className="max-w-5xl mx-auto px-4 -mt-20 space-y-6">
         
-        {/* Info y Banco (Sin cambios) */}
+        {/* Info y Banco */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Datos de Contacto</h3>
@@ -197,7 +203,7 @@ export default function ClientProfilePage() {
             </div>
         </div>
 
-        {/* --- CONTROL DE COBRANZA (Sin cambios mayores) --- */}
+        {/* --- CONTROL DE COBRANZA --- */}
         {activeLoan && activeLoan.status === 'aprobado' && (
              <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2 flex items-center gap-2">
@@ -219,7 +225,6 @@ export default function ClientProfilePage() {
                              <button 
                                 onClick={() => handleReminder(nextPayment.number, nextPayment.date)}
                                 className="bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 px-4 py-3 rounded-xl font-bold shadow-sm flex items-center gap-2"
-                                title="Enviar recordatorio por WhatsApp"
                             >
                                 <MessageCircle size={20} /> <span className="hidden sm:inline">Recordar</span>
                             </button>
@@ -234,7 +239,7 @@ export default function ClientProfilePage() {
                     </div>
                 ) : (
                     <div className="bg-green-100 text-green-800 p-4 rounded-xl text-center font-bold mb-6">
-                        🎉 ¡Préstamo Liquidado! Todos los pagos han sido registrados.
+                        🎉 ¡Préstamo Liquidado!
                     </div>
                 )}
 
@@ -265,7 +270,7 @@ export default function ClientProfilePage() {
              </div>
         )}
 
-        {/* --- SECCIÓN NUEVA: DOCUMENTACIÓN LEGAL (CON PDF) --- */}
+        {/* --- DOCUMENTACIÓN LEGAL --- */}
         {activeLoan && activeLoan.status === 'aprobado' && (
           <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2 flex items-center gap-2">
@@ -273,59 +278,40 @@ export default function ClientProfilePage() {
             </h3>
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-200">
               <div>
-                <h4 className="text-lg font-bold text-gray-800">Contrato de Préstamo Mercantil</h4>
-                <p className="text-sm text-gray-600">Este documento incluye los términos, condiciones y el pagaré firmado digitalmente por el cliente.</p>
+                <h4 className="text-lg font-bold text-gray-800">Contrato de Préstamo</h4>
+                <p className="text-sm text-gray-600">Incluye términos, condiciones y pagaré firmado.</p>
               </div>
-              
-              {/* IMPORTANTE: El componente PDFDownloadLink necesita que le pasemos
-                  el componente del documento (<ContractDocument />) y un nombre de archivo.
-              */}
               <PDFDownloadLink
                 document={<ContractDocument client={client} loan={activeLoan} />}
-                fileName={`Contrato_${client.name.replace(/\s+/g, '_')}_${activeLoan.id}.pdf`}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-md transition transform active:scale-95 flex items-center gap-2 no-underline"
+                fileName={`Contrato_${client.name.replace(/\s+/g, '_')}.pdf`}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-md transition flex items-center gap-2"
               >
-                {/* Esta función renderiza el botón y cambia el texto mientras se genera el PDF */}
-                {({ blob, url, loading, error }) =>
-                  loading ? 'Generando PDF...' : <><FileText size={20} /> Descargar Contrato PDF</>
-                }
+                {({ loading }) => loading ? 'Generando...' : <><FileText size={20} /> Descargar PDF</>}
               </PDFDownloadLink>
             </div>
           </div>
         )}
 
-        {/* Documentos Visuales (Sin cambios) */}
+        {/* Documentos Visuales */}
         <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Expediente Digital (Imágenes)</h3>
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b pb-2">Expediente Digital</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <DocThumbnail 
-                    title="INE Frente" 
-                    url={ineFrontUrl} 
-                    fileName={`INE_Frente_${client.name}.jpg`} 
-                />
-                <DocThumbnail 
-                    title="INE Reverso" 
-                    url={ineBackUrl} 
-                    fileName={`INE_Reverso_${client.name}.jpg`} 
-                />
-                <DocThumbnail 
-                    title="Selfie" 
-                    url={selfieUrl} 
-                    fileName={`Selfie_${client.name}.jpg`} 
-                />
-                <div className="col-span-1"><p className="text-xs font-bold text-gray-500 mb-2">Firma Pagaré</p>{signatureUrl ? (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center p-2 cursor-pointer hover:bg-white transition" onClick={() => window.open(signatureUrl)}><img src={signatureUrl} className="max-w-full max-h-full opacity-80" alt="Firma" /></div>) : (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400"><span className="text-xs">Pendiente</span></div>)}</div>
+                <DocThumbnail title="INE Frente" url={ineFrontUrl} fileName={`INE_Frente_${client.name}.jpg`} />
+                <DocThumbnail title="INE Reverso" url={ineBackUrl} fileName={`INE_Reverso_${client.name}.jpg`} />
+                <DocThumbnail title="Selfie" url={selfieUrl} fileName={`Selfie_${client.name}.jpg`} />
+                <div className="col-span-1"><p className="text-xs font-bold text-gray-500 mb-2">Firma Pagaré</p>{signatureUrl ? (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center p-2"><img src={signatureUrl} className="max-w-full max-h-full opacity-80" alt="Firma" /></div>) : (<div className="h-32 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400"><span className="text-xs">Pendiente</span></div>)}</div>
             </div>
         </div>
 
-        {/* BOTÓN DE ACTIVACIÓN (Sin cambios) */}
+        {/* BOTÓN DE ACTIVACIÓN (Si pendiente) */}
         {activeLoan && activeLoan.status === 'pendiente' ? (
              <div className="pb-10 animate-pulse">
                 <button 
                     onClick={() => handleAuthorize(activeLoan.id, activeLoan.amount)}
                     disabled={processing}
-                    className="w-full py-5 bg-green-500 hover:bg-green-600 text-white font-bold text-lg rounded-2xl shadow-xl shadow-green-200 transition transform active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                    className="w-full py-5 bg-green-500 hover:bg-green-600 text-white font-bold text-lg rounded-2xl shadow-xl shadow-green-200 transition active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
                 >
-                    {processing ? "Procesando..." : <><FileCheck size={24} /> Confirmar Transferencia y Notificar por WhatsApp</>}
+                    {processing ? "Procesando..." : <><FileCheck size={24} /> Confirmar Transferencia</>}
                 </button>
             </div>
         ) : null}
@@ -335,17 +321,13 @@ export default function ClientProfilePage() {
   );
 }
 
-// --- COMPONENTE MEJORADO PARA DESCARGAR IMÁGENES ---
 function DocThumbnail({ title, url, fileName }) {
-    
-    // Función para forzar la descarga
     const handleDownload = (e) => {
-        e.stopPropagation(); // Evita que se abra el modal si hay clic
+        e.stopPropagation();
         if (!url) return;
-
         const link = document.createElement('a');
         link.href = url;
-        link.download = fileName || 'documento_pactovale.jpg';
+        link.download = fileName || 'documento.jpg';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -354,38 +336,16 @@ function DocThumbnail({ title, url, fileName }) {
     return (
         <div className="col-span-1 flex flex-col group">
             <p className="text-xs font-bold text-gray-500 mb-2">{title}</p>
-            
             {url ? (
-                <div className="relative h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-sm transition-all hover:shadow-md">
-                    
-                    {/* Imagen de fondo */}
+                <div className="relative h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-sm hover:shadow-md">
                     <img src={url} className="w-full h-full object-cover" alt={title} />
-                    
-                    {/* Capa oscura al pasar el mouse (Hover) */}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
-                        
-                        {/* Botón Ver (Ojo) */}
-                        <button 
-                            onClick={() => window.open(url, '_blank')}
-                            className="bg-white text-gray-800 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-100 flex items-center gap-1"
-                        >
-                             👁️ Ver
-                        </button>
-
-                        {/* Botón Descargar (Flecha) */}
-                        <button 
-                            onClick={handleDownload}
-                            className="bg-[#ff5aa4] text-white px-3 py-1 rounded-full text-xs font-bold hover:bg-pink-600 flex items-center gap-1"
-                        >
-                             ⬇️ Descargar
-                        </button>
+                        <button onClick={() => window.open(url, '_blank')} className="bg-white text-gray-800 px-3 py-1 rounded-full text-xs font-bold hover:bg-gray-100">👁️ Ver</button>
+                        <button onClick={handleDownload} className="bg-[#ff5aa4] text-white px-3 py-1 rounded-full text-xs font-bold hover:bg-pink-600">⬇️ Bajar</button>
                     </div>
                 </div>
             ) : (
-                <div className="h-32 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1">
-                    <User size={20} className="opacity-20" />
-                    <span className="text-[10px] uppercase font-bold">Pendiente</span>
-                </div>
+                <div className="h-32 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1"><User size={20} className="opacity-20" /><span className="text-[10px]">Pendiente</span></div>
             )}
         </div>
     );
