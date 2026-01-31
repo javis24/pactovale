@@ -4,6 +4,7 @@ import User from './User';
 
 const Loan = sequelize.define('Loan', {
   amount: { type: DataTypes.FLOAT, allowNull: false },
+  paymentAmount: { type: DataTypes.FLOAT, allowNull: true },
   status: { 
     type: DataTypes.ENUM('pendiente', 'aprobado', 'pagado', 'rechazado'), 
     defaultValue: 'pendiente' 

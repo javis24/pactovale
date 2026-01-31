@@ -43,6 +43,7 @@ export async function POST(request) {
       status: 'pendiente',
       UserId: user.id,
       totalPayments: parseInt(term), 
+      paymentAmount: parseFloat(payment),
       paymentsMade: 0
     });
 
