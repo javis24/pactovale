@@ -25,50 +25,41 @@ const LOAN_TABLE = {
 
 export async function GET() {
   try {
-    console.log("Iniciando sincronización de tabla Loan...");
-    
-    // 1. 🚨 FUERZA LA CREACIÓN DE LA COLUMNA
-    // Esto le dice a MySQL: "Si falta la columna paymentAmount, créala AHORA"
-    await Loan.sync({ alter: true });
-    
-    console.log("Tabla sincronizada. Iniciando actualización de datos...");
-
-    // 2. Traer todos los préstamos
     const loans = await Loan.findAll();
     let updatedCount = 0;
 
     for (const loan of loans) {
-      
-      // Si ya tiene pago, lo saltamos
-      if (loan.paymentAmount && loan.paymentAmount > 0) continue;
-
       const amount = loan.amount;       
       const term = loan.totalPayments;  
 
-      // 3. Buscar precio en tabla
+      // --- CORRECCIÓN ---
+      // Si el pago quincenal es IGUAL al monto total, está mal. Lo forzamos a recalcular.
+      // O si queremos forzar a todos para asegurarnos, quitamos la validación.
+      
       let correctPayment = 0;
 
       if (LOAN_TABLE[amount] && LOAN_TABLE[amount][term]) {
           correctPayment = LOAN_TABLE[amount][term];
       } else {
-          // Fallback matemático si no está en la tabla
+          // Fallback
           const baseRate = 1.6; 
           correctPayment = Math.ceil((amount * baseRate) / term);
       }
 
-      // 4. Guardar
-      await loan.update({ paymentAmount: correctPayment });
-      updatedCount++;
+      // Solo actualizamos si el valor actual es diferente al correcto
+      if (loan.paymentAmount !== correctPayment) {
+          console.log(`Corrigiendo préstamo ID ${loan.id}: ${loan.paymentAmount} -> ${correctPayment}`);
+          await loan.update({ paymentAmount: correctPayment });
+          updatedCount++;
+      }
     }
 
     return NextResponse.json({ 
-        message: '¡Éxito! Columna creada y datos actualizados.', 
-        totalLoans: loans.length,
+        message: 'Corrección de montos finalizada', 
         updated: updatedCount 
     });
 
   } catch (error) {
-    console.error("Error crítico:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
