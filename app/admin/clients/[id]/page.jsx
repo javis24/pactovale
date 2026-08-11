@@ -111,6 +111,13 @@ export default function ClientProfilePage() {
 
   const loans = client.Loans ? [...client.Loans].reverse() : [];
   const activeLoan = loans.find(l => l.status === 'aprobado' || l.status === 'pendiente');
+  const displayedPaymentAmount =
+  activeLoan?.status === 'pendiente'
+    ? getLoanPaymentAmount(
+        activeLoan.amount,
+        activeLoan.totalPayments
+      ) ?? Number(activeLoan.paymentAmount || 0)
+    : Number(activeLoan?.paymentAmount || 0);
   const schedule = activeLoan && activeLoan.status === 'aprobado'
     ? buildPaymentSchedule({
         startDate: activeLoan.startDate,
@@ -198,7 +205,7 @@ export default function ClientProfilePage() {
                                 )}
                                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-1"><Clock size={14}/> {activeLoan.totalPayments} Quincenas</p>
                                 <p className="mt-1 text-sm font-bold text-[#e9478d]">
-                                  ${Number(activeLoan.paymentAmount || 0).toLocaleString('es-MX')} por quincena
+                                  ${displayedPaymentAmount.toLocaleString('es-MX')} por quincena
                                 </p>
                             </div>
                             <div className="text-right">

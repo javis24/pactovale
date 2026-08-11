@@ -1,34 +1,11 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Camera, CreditCard, ChevronRight, ChevronLeft, CheckCircle, Image as ImageIcon, ArrowLeft, PenTool, Eraser, DollarSign, Calendar, Calculator } from "lucide-react";
+import { Camera, CreditCard, ChevronLeft, CheckCircle, Image as ImageIcon, ArrowLeft, Eraser, DollarSign, Calendar, Calculator } from "lucide-react";
 import SignatureCanvas from 'react-signature-canvas';
 import Link from "next/link";
-
-// --- DATOS DE LA TABLA "PLATA ORO DIAMANTE" ---
-// Digitalización exacta de tu imagen para el cotizador
-const LOAN_TABLE = {
-  1000: { 6: 266, 8: 208, 10: 178 },
-  1500: { 6: 385, 8: 299, 10: 254 },
-  2000: { 6: 504, 8: 389, 10: 329 },
-  2500: { 6: 624, 8: 480, 10: 405 },
-  3000: { 6: 743, 8: 570, 10: 480 },
-  3500: { 6: 862, 8: 661, 10: 556 },
-  4000: { 6: 982, 8: 751, 10: 631 },
-  4500: { 8: 842, 10: 707 },        // No hay 6 quincenas
-  5000: { 8: 932, 10: 782 },
-  5500: { 8: 1023, 10: 858 },
-  6000: { 8: 1113, 10: 933 },
-  6500: { 10: 1009 },               // Solo 10 quincenas en adelante
-  7000: { 10: 1084 },
-  7500: { 10: 1160 },
-  8000: { 10: 1235 },
-  8500: { 10: 1311 },
-  9000: { 10: 1386 },
-  9500: { 10: 1462 },
-  10000: { 10: 1537 }
-};
+import { LOAN_TABLE } from "@/lib/loanRules";
 
 export default function LoanRequestPage() {
   const { data: session, status } = useSession();
@@ -43,9 +20,9 @@ export default function LoanRequestPage() {
 
   // Datos del Préstamo (Cotizador)
   const [loanSelection, setLoanSelection] = useState({
-    amount: 1000,    // Monto seleccionado
-    term: 6,         // Plazo seleccionado (6, 8, 10)
-    payment: 266     // Pago quincenal calculado
+    amount: 3000,    // Monto seleccionado
+    term: 6,         // Plazo seleccionado
+    payment: 749     // Pago quincenal calculado
   });
 
   // Datos de Archivos
@@ -135,7 +112,7 @@ export default function LoanRequestPage() {
         const compressedFile = await compressImage(file);
         setFiles(prev => ({ ...prev, [field]: compressedFile }));
         setPreviews(prev => ({ ...prev, [field]: URL.createObjectURL(compressedFile) }));
-      } catch (error) { alert("Error procesando imagen."); } 
+      } catch { alert("Error procesando imagen."); }
       finally { setCompressing(false); }
     }
   };
@@ -166,7 +143,6 @@ export default function LoanRequestPage() {
       const payload = {
         amount: loanSelection.amount,
         term: loanSelection.term,       // Enviamos el plazo
-        payment: loanSelection.payment, // Enviamos el pago calculado
         bankName: bankData.bankName,
         accountNumber: bankData.accountNumber,
         signature: signatureImage,      // Ya está en Base64
@@ -253,7 +229,7 @@ export default function LoanRequestPage() {
                 <label className="relative cursor-pointer group">
                     <input type="file" accept="image/*" capture="user" onChange={(e) => handleFileChange(e, 'selfie')} className="hidden" />
                     <div className={`w-64 h-64 rounded-full border-4 flex items-center justify-center overflow-hidden shadow-xl transition-all ${previews.selfie ? 'border-[#ff5aa4]' : 'border-gray-200 border-dashed bg-gray-50'}`}>
-                        {previews.selfie ? <img src={previews.selfie} className="w-full h-full object-cover" /> : <Camera size={60} className="text-gray-400" />}
+                        {previews.selfie ? <img src={previews.selfie} alt="Vista previa de la selfie" className="w-full h-full object-cover" /> : <Camera size={60} className="text-gray-400" />}
                     </div>
                 </label>
             </div>
@@ -294,8 +270,8 @@ export default function LoanRequestPage() {
                         <label className="block text-sm font-bold text-gray-600 mb-3 flex items-center gap-2">
                             <Calendar size={16} className="text-blue-500"/> Plazo (Quincenas)
                         </label>
-                        <div className="grid grid-cols-3 gap-3">
-                            {[6, 8, 10].map(term => {
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            {[6, 8, 10, 12, 14, 16, 18].map(term => {
                                 const isAvailable = LOAN_TABLE[loanSelection.amount][term];
                                 const isSelected = loanSelection.term === term;
                                 return (
@@ -437,7 +413,7 @@ function ImageUploadBox({ label, preview, onChange, icon }) {
             <span className="text-sm font-bold text-gray-600 mb-2 block ml-1">{label}</span>
             <input type="file" accept="image/*" onChange={onChange} className="hidden" />
             <div className={`w-full h-32 rounded-2xl border-2 border-dashed flex items-center justify-center relative overflow-hidden transition-all ${preview ? 'border-green-400 bg-green-50' : 'border-gray-300 bg-white hover:bg-gray-50'}`}>
-                {preview ? <><img src={preview} className="w-full h-full object-cover opacity-60" /><div className="absolute inset-0 flex items-center justify-center"><span className="bg-white/90 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm flex items-center gap-1"><CheckCircle size={14} /> Listo</span></div></> : <div className="flex flex-col items-center text-gray-400 group-hover:text-[#ff5aa4]"><div className="p-2 bg-gray-100 rounded-full mb-2">{icon}</div><span className="text-xs font-medium">Toca para subir</span></div>}
+                {preview ? <><img src={preview} alt={`Vista previa de ${label}`} className="w-full h-full object-cover opacity-60" /><div className="absolute inset-0 flex items-center justify-center"><span className="bg-white/90 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm flex items-center gap-1"><CheckCircle size={14} /> Listo</span></div></> : <div className="flex flex-col items-center text-gray-400 group-hover:text-[#ff5aa4]"><div className="p-2 bg-gray-100 rounded-full mb-2">{icon}</div><span className="text-xs font-medium">Toca para subir</span></div>}
             </div>
         </label>
     );
