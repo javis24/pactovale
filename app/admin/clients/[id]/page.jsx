@@ -1,10 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, Download, Calendar, DollarSign, Clock, CheckCircle, MessageCircle, FileText } from "lucide-react";
+import { ArrowLeft, Phone, MapPin, CreditCard, FileCheck, User, DollarSign, Clock, CheckCircle, MessageCircle, FileText, WalletCards, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import ContractDocument from "@/app/components/ContractPDF";
+import {
+  buildPaymentSchedule,
+  formatPaymentDate,
+  getApprovalAmountOptions,
+  getFirstPaymentDate,
+  getLoanPaymentAmount,
+} from "@/lib/loanRules";
 
 const PDFDownloadLink = dynamic(
   () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -13,10 +20,11 @@ const PDFDownloadLink = dynamic(
 
 export default function ClientProfilePage() {
   const { id } = useParams();
-  const router = useRouter();
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalAmount, setApprovalAmount] = useState("");
 
   const theme = { primary: "#ff5aa4", bg: "#f8fafc" };
 
@@ -41,22 +49,26 @@ export default function ClientProfilePage() {
     window.open(`https://wa.me/${cleanNumber}?text=${encodedMessage}`, '_blank');
   };
 
-  const handleAuthorize = async (loanId, amount) => {
-    if(!confirm("¿Confirmas la transferencia? Esto notificará al cliente por WhatsApp.")) return;
+  const handleAuthorize = async (loanId) => {
     setProcessing(true);
     try {
         const res = await fetch('/api/admin/approve-loan', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ loanId })
+            body: JSON.stringify({ loanId, approvedAmount: Number(approvalAmount) })
         });
         if(res.ok) {
-            const msg = `¡Hola ${client.name}! 👋\n\n¡Felicidades! 🎉 Tu préstamo de $${amount} ha sido aprobado y depositado.\n\nPuedes ver tu calendario de pagos aquí: https://pactovale.com/portal`;
+            const data = await res.json();
+            const firstPayment = formatPaymentDate(data.firstPaymentDate);
+            const msg = `¡Hola ${client.name}! 👋\n\n¡Felicidades! 🎉 Tu préstamo por $${Number(data.amount).toLocaleString('es-MX')} fue aprobado y depositado. Tu pago quincenal será de $${Number(data.paymentAmount).toLocaleString('es-MX')} y el primer vencimiento será el ${firstPayment}.\n\nPuedes ver tu calendario de pagos aquí: https://pactovale.com/portal`;
             sendWhatsApp(client.whatsapp, msg);
-            alert("✅ Autorizado.");
+            alert("✅ Préstamo autorizado con el monto disponible en caja.");
             window.location.reload();
-        } else { alert("Error al autorizar."); }
-    } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
+        } else {
+            const data = await res.json();
+            alert(data.message || "Error al autorizar.");
+        }
+    } catch { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
   const handleRegisterPayment = async (loanId, paymentNumber) => {
@@ -74,11 +86,11 @@ export default function ClientProfilePage() {
             alert("✅ Pago registrado."); 
             window.location.reload(); 
         } else { const d = await res.json(); alert(d.message); }
-    } catch (error) { alert("Error de conexión"); } finally { setProcessing(false); }
+    } catch { alert("Error de conexión"); } finally { setProcessing(false); }
   };
 
   const handleReminder = (paymentNumber, date) => {
-      const dateStr = new Date(date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+      const dateStr = formatPaymentDate(date);
       const msg = `Hola ${client.name} 👋\n\nRecordatorio: Tu pago de la Quincena #${paymentNumber} vence el *${dateStr}*. ⏳`;
       sendWhatsApp(client.whatsapp, msg);
   };
@@ -87,41 +99,6 @@ export default function ClientProfilePage() {
     if (!client) return null;
     const doc = client.Documents ? client.Documents.find(d => d.type === type) : null;
     return doc ? doc.url : (client[type] || null);
-  };
-
-  // --- 📅 NUEVA LÓGICA DE CALENDARIO ---
-  const getSchedule = (loan) => {
-      if(!loan || !loan.startDate) return [];
-      
-      const start = new Date(loan.startDate);
-      const startDay = start.getDate(); // Día del mes (1-31)
-      let dates = [];
-      
-      // 1. Determinar la fecha del PRIMER pago
-      let currentPaymentDate = new Date(start);
-
-      if (startDay < 27) {
-          // REGLA 1: Si es antes del 27, se paga el día 30 de ESTE mes
-          currentPaymentDate.setDate(30); 
-      } else {
-          // REGLA 2: Si es 27 o más, se toman 15 días naturales (brinca al siguiente mes)
-          currentPaymentDate.setDate(start.getDate() + 15);
-      }
-
-      // 2. Generar el resto de pagos
-      for (let i = 1; i <= loan.totalPayments; i++) {
-        // Guardamos la fecha actual en el array
-        dates.push({ 
-            number: i, 
-            date: new Date(currentPaymentDate), // Copia de la fecha
-            status: i <= loan.paymentsMade ? 'pagado' : 'pendiente' 
-        });
-
-        // Calculamos la fecha del SIGUIENTE pago (+15 días)
-        currentPaymentDate.setDate(currentPaymentDate.getDate() + 15);
-      }
-      
-      return dates;
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="w-10 h-10 border-4 border-pink-200 border-t-[#ff5aa4] rounded-full animate-spin"></div></div>;
@@ -134,8 +111,28 @@ export default function ClientProfilePage() {
 
   const loans = client.Loans ? [...client.Loans].reverse() : [];
   const activeLoan = loans.find(l => l.status === 'aprobado' || l.status === 'pendiente');
-  const schedule = activeLoan && activeLoan.status === 'aprobado' ? getSchedule(activeLoan) : [];
+  const schedule = activeLoan && activeLoan.status === 'aprobado'
+    ? buildPaymentSchedule({
+        startDate: activeLoan.startDate,
+        totalPayments: activeLoan.totalPayments,
+        paymentsMade: activeLoan.paymentsMade,
+      })
+    : [];
   const nextPayment = schedule.find(p => p.status === 'pendiente');
+  const requestedAmount = Number(activeLoan?.requestedAmount || activeLoan?.amount || 0);
+  const approvalOptions = activeLoan
+    ? getApprovalAmountOptions(requestedAmount, activeLoan.totalPayments)
+    : [];
+  const selectedPaymentAmount = activeLoan
+    ? getLoanPaymentAmount(Number(approvalAmount), activeLoan.totalPayments)
+    : null;
+  const estimatedFirstPayment = getFirstPaymentDate(new Date());
+
+  const openApproval = () => {
+    const initialAmount = approvalOptions[0] || requestedAmount;
+    setApprovalAmount(String(initialAmount));
+    setApprovalOpen(true);
+  };
 
   return (
     <div className="min-h-screen font-sans pb-10" style={{ backgroundColor: theme.bg }}>
@@ -190,8 +187,19 @@ export default function ClientProfilePage() {
                         </div>
                         <div className="flex justify-between items-end">
                             <div>
-                                <p className="text-3xl font-bold text-gray-800">${activeLoan.amount}</p>
+                                <p className="text-xs font-bold text-gray-400 uppercase">
+                                  {activeLoan.status === 'aprobado' ? 'Monto autorizado' : 'Monto solicitado'}
+                                </p>
+                                <p className="text-3xl font-bold text-gray-800">${Number(activeLoan.amount).toLocaleString('es-MX')}</p>
+                                {activeLoan.status === 'aprobado' && requestedAmount !== Number(activeLoan.amount) && (
+                                  <p className="mt-1 text-xs font-semibold text-gray-400 line-through">
+                                    Solicitado: ${requestedAmount.toLocaleString('es-MX')}
+                                  </p>
+                                )}
                                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-1"><Clock size={14}/> {activeLoan.totalPayments} Quincenas</p>
+                                <p className="mt-1 text-sm font-bold text-[#e9478d]">
+                                  ${Number(activeLoan.paymentAmount || 0).toLocaleString('es-MX')} por quincena
+                                </p>
                             </div>
                             <div className="text-right">
                                 <p className="text-xs font-bold text-gray-400 mb-1">PROGRESO</p>
@@ -218,7 +226,7 @@ export default function ClientProfilePage() {
                             </div>
                             <div>
                                 <h4 className="text-lg font-bold text-gray-800">Próximo Pago: Quincena {nextPayment.number}</h4>
-                                <p className="text-sm text-gray-600">Fecha esperada: {nextPayment.date.toLocaleDateString()}</p>
+                                <p className="text-sm text-gray-600">Fecha esperada: {formatPaymentDate(nextPayment.date)}</p>
                             </div>
                         </div>
                         <div className="flex gap-2">
@@ -256,7 +264,7 @@ export default function ClientProfilePage() {
                             {schedule.map((pay) => (
                                 <tr key={pay.number} className="hover:bg-gray-50">
                                     <td className="px-4 py-3 font-bold text-gray-600">{pay.number}</td>
-                                    <td className="px-4 py-3 text-gray-600">{pay.date.toLocaleDateString()}</td>
+                                    <td className="px-4 py-3 text-gray-600">{formatPaymentDate(pay.date)}</td>
                                     <td className="px-4 py-3 text-right">
                                         <span className={`px-2 py-1 rounded-full text-xs font-bold ${pay.status === 'pagado' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
                                             {pay.status.toUpperCase()}
@@ -307,16 +315,88 @@ export default function ClientProfilePage() {
         {activeLoan && activeLoan.status === 'pendiente' ? (
              <div className="pb-10 animate-pulse">
                 <button 
-                    onClick={() => handleAuthorize(activeLoan.id, activeLoan.amount)}
+                    onClick={openApproval}
                     disabled={processing}
                     className="w-full py-5 bg-green-500 hover:bg-green-600 text-white font-bold text-lg rounded-2xl shadow-xl shadow-green-200 transition active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
                 >
-                    {processing ? "Procesando..." : <><FileCheck size={24} /> Confirmar Transferencia</>}
+                    {processing ? "Procesando..." : <><FileCheck size={24} /> Revisar monto y autorizar</>}
                 </button>
             </div>
         ) : null}
 
       </div>
+
+      {approvalOpen && activeLoan?.status === 'pendiente' && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+          <div role="dialog" aria-modal="true" aria-labelledby="approval-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[30px] bg-white p-6 shadow-2xl sm:max-w-lg sm:rounded-[30px] sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-green-100 text-green-700">
+                  <WalletCards size={24} />
+                </div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-green-600">Disponibilidad en caja</p>
+                <h2 id="approval-title" className="mt-1 text-2xl font-black text-gray-900">Autorizar préstamo</h2>
+              </div>
+              <button type="button" onClick={() => setApprovalOpen(false)} aria-label="Cerrar" className="flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">
+                <X size={21} />
+              </button>
+            </div>
+
+            <div className="mt-6 rounded-2xl bg-gray-50 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-500">Monto solicitado</span>
+                <strong className="text-lg text-gray-900">${requestedAmount.toLocaleString('es-MX')}</strong>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-500">Plazo solicitado</span>
+                <strong className="text-gray-900">{activeLoan.totalPayments} quincenas</strong>
+              </div>
+            </div>
+
+            <label htmlFor="approvalAmount" className="mt-6 block text-sm font-bold text-gray-700">Monto disponible para autorizar</label>
+            <select
+              id="approvalAmount"
+              value={approvalAmount}
+              onChange={(event) => setApprovalAmount(event.target.value)}
+              className="mt-2 min-h-14 w-full rounded-2xl border border-gray-200 bg-white px-4 text-base font-bold text-gray-900 outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100"
+            >
+              {approvalOptions.map((amount) => (
+                <option key={amount} value={amount}>
+                  ${amount.toLocaleString('es-MX')} — pago de ${getLoanPaymentAmount(amount, activeLoan.totalPayments).toLocaleString('es-MX')}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs leading-relaxed text-gray-400">Solo se muestran montos compatibles con el plazo elegido y que no superan la solicitud.</p>
+
+            {selectedPaymentAmount !== null && (
+              <div className="mt-5 rounded-2xl border border-pink-100 bg-pink-50 p-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-gray-400">Pago quincenal</p>
+                    <p className="mt-1 text-xl font-black text-[#e9478d]">${selectedPaymentAmount.toLocaleString('es-MX')}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase text-gray-400">Total programado</p>
+                    <p className="mt-1 text-xl font-black text-gray-900">${(selectedPaymentAmount * activeLoan.totalPayments).toLocaleString('es-MX')}</p>
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-pink-100 pt-4 text-sm text-gray-600">
+                  Primer pago estimado: <strong>{formatPaymentDate(estimatedFirstPayment)}</strong>. Después vencerá únicamente los días 15 y 30.
+                </div>
+              </div>
+            )}
+
+            <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row">
+              <button type="button" onClick={() => setApprovalOpen(false)} disabled={processing} className="min-h-13 flex-1 rounded-2xl border border-gray-200 px-5 font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+                Cancelar
+              </button>
+              <button type="button" onClick={() => handleAuthorize(activeLoan.id)} disabled={processing || selectedPaymentAmount === null} className="min-h-13 flex-[1.35] rounded-2xl bg-green-500 px-5 font-bold text-white shadow-lg shadow-green-200 hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50">
+                {processing ? "Autorizando..." : `Autorizar $${Number(approvalAmount || 0).toLocaleString('es-MX')}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
