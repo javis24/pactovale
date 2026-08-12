@@ -20,6 +20,7 @@ const User = sequelize.define('User', {
   ineFront: { type: DataTypes.TEXT('long'), allowNull: true },
   ineBack: { type: DataTypes.TEXT('long'), allowNull: true },
   selfie: { type: DataTypes.TEXT('long'), allowNull: true },
+  addressProof: { type: DataTypes.TEXT('long'), allowNull: true },
   signature: { type: DataTypes.TEXT('long'), allowNull: true },
 
   role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' }

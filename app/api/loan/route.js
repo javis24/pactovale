@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import User from '@/models/User';
 import Loan from '@/models/Loan';
+import { getLoanPaymentAmount } from '@/lib/loanRules';
 
 export async function POST(request) {
   try {
@@ -12,10 +13,24 @@ export async function POST(request) {
     const body = await request.json();
 
     const { 
-      amount, term, payment, 
+      amount, term,
       bankName, accountNumber, 
-      signature, ineFront, ineBack, selfie 
+      signature, ineFront, ineBack, selfie, addressProof
     } = body;
+
+    const requestedAmount = Number(amount);
+    const totalPayments = Number(term);
+    const paymentAmount = getLoanPaymentAmount(requestedAmount, totalPayments);
+
+    if (paymentAmount === null) {
+      return NextResponse.json({ message: 'El monto o el plazo seleccionado no es válido' }, { status: 400 });
+    }
+
+    if (typeof addressProof !== 'string' || !addressProof.startsWith('data:image/')) {
+      return NextResponse.json({
+        message: 'Debes subir una fotografía válida de tu comprobante de domicilio reciente'
+      }, { status: 400 });
+    }
 
     const user = await User.findOne({ where: { email: session.user.email } });
     if (!user) return NextResponse.json({ message: 'Usuario no encontrado' }, { status: 404 });
@@ -32,6 +47,7 @@ export async function POST(request) {
       ineFront: ineFront || user.ineFront,
       ineBack: ineBack || user.ineBack,
       selfie: selfie || user.selfie,
+      addressProof,
       signature: signature || user.signature,
       bankName: bankName,
       accountNumber: accountNumber
@@ -39,11 +55,12 @@ export async function POST(request) {
 
 
     const newLoan = await Loan.create({
-      amount: parseFloat(amount),
+      amount: requestedAmount,
+      requestedAmount,
       status: 'pendiente',
       UserId: user.id,
-      totalPayments: parseInt(term), 
-      paymentAmount: parseFloat(payment),
+      totalPayments,
+      paymentAmount,
       paymentsMade: 0
     });
 
